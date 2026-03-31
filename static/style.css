@@ -1,0 +1,460 @@
+/* ============================================================
+   PA Theorem Prover — Web UI
+   Parchment / tan aesthetic, clean and minimal
+   ============================================================ */
+
+/* ── Variables ─────────────────────────────────────────────── */
+:root {
+  --bg:           #EDE0C8;
+  --bg-side:      #E4D3B4;
+  --bg-term:      #F6EDD8;
+  --bg-hdr:       #A8854E;
+  --bg-hdr-light: #C4A87A;
+
+  --border:       #C8AD87;
+  --divider:      #BFA070;
+  --divider-hover:#8A6030;
+
+  --text:         #1A0F06;
+  --accent:       #5C3010;
+  --muted:        #7A5830;
+  --muted-light:  #B09060;
+  --faint:        #D0B888;
+
+  --success:      #2E6040;
+  --success-bg:   #D8EAD8;
+  --error:        #7A2010;
+  --error-bg:     #F0D0C0;
+
+  --fact-hover:   rgba(0,0,0,.055);
+  --fact-active:  rgba(0,0,0,.10);
+  --fact-new-bg:  #C8E0C4;
+
+  --font-ui:   -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+
+  --radius:     4px;
+  --hdr-h:      46px;
+  --div-size:   5px;
+}
+
+/* ── Reset ──────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── App shell ──────────────────────────────────────────────── */
+#app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ─────────────────────────────────────────────────── */
+#app-header {
+  flex: 0 0 var(--hdr-h);
+  height: var(--hdr-h);
+  background: var(--bg-hdr);
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  gap: 10px;
+  border-bottom: 2px solid var(--bg-hdr);
+}
+
+.header-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  color: #F8EFD8;
+  flex: 1;
+}
+
+.header-btn {
+  background: rgba(255,255,255,.14);
+  border: 1px solid rgba(255,255,255,.22);
+  color: #F8EFD8;
+  padding: 4px 14px;
+  border-radius: var(--radius);
+  font: 12px var(--font-ui);
+  cursor: pointer;
+  transition: background .15s;
+}
+.header-btn:hover { background: rgba(255,255,255,.26); }
+
+/* ── Workspace ──────────────────────────────────────────────── */
+#workspace {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Main area (top portion) ────────────────────────────────── */
+#main-area {
+  flex: 6 1 0;
+  display: flex;
+  overflow: hidden;
+  min-height: 90px;
+}
+
+/* ── Panel headers ───────────────────────────────────────────── */
+.panel-header {
+  flex: 0 0 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  background: var(--bg-hdr-light);
+  color: #F8EFD8;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  gap: 8px;
+  user-select: none;
+}
+
+.panel-hint {
+  margin-left: auto;
+  font-size: 9.5px;
+  font-weight: 400;
+  letter-spacing: .04em;
+  opacity: .72;
+}
+
+/* ── Fact list panel ─────────────────────────────────────────── */
+#fact-panel {
+  flex: 0 0 38%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+  min-width: 130px;
+}
+
+#fact-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 5px 0;
+}
+
+.fact-empty {
+  padding: 18px 16px;
+  font-size: 12px;
+  color: var(--muted-light);
+  font-style: italic;
+}
+
+.fact-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 16px;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background .1s;
+  font-family: var(--font-mono);
+}
+.fact-item:hover  { background: var(--fact-hover);  }
+.fact-item:active { background: var(--fact-active); }
+
+.fact-num {
+  font-size: 10px;
+  color: var(--muted-light);
+  flex: 0 0 30px;
+  user-select: none;
+}
+
+.fact-prop {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+@keyframes fact-flash {
+  0%   { background: var(--fact-new-bg); }
+  100% { background: transparent; }
+}
+.fact-item.new { animation: fact-flash 1.2s ease-out; }
+
+/* ── Horizontal drag divider ─────────────────────────────────── */
+#h-divider {
+  flex: 0 0 var(--div-size);
+  background: var(--divider);
+  cursor: ew-resize;
+  transition: background .15s;
+  position: relative;
+}
+#h-divider::after {
+  content: '';
+  position: absolute;
+  inset: 0 -3px;   /* widen the hit area */
+}
+#h-divider:hover,
+#h-divider.dragging { background: var(--divider-hover); }
+
+/* ── Command reference panel ─────────────────────────────────── */
+#cmd-panel {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-side);
+  overflow: hidden;
+  min-width: 130px;
+}
+
+#cmd-reference {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 20px 24px;
+}
+
+.ref-section {
+  margin-bottom: 22px;
+}
+
+.ref-section h3 {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--faint);
+}
+
+.ref-item {
+  margin-bottom: 10px;
+}
+
+.ref-sig {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.ref-name {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.ref-args {
+  color: var(--muted);
+}
+
+.ref-result {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  padding-left: 14px;
+  margin-top: 1px;
+}
+
+.ref-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.ref-table td {
+  padding: 3px 0;
+  vertical-align: top;
+}
+.ref-table td:first-child {
+  color: var(--text);
+  padding-right: 18px;
+  white-space: nowrap;
+}
+.ref-table td:last-child {
+  color: var(--muted);
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.shortcut-click {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1px 6px;
+  font-size: 11px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  cursor: default;
+}
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: var(--radius);
+  padding: 1px 6px;
+  font: 11px var(--font-mono);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* ── Vertical drag divider ───────────────────────────────────── */
+#v-divider {
+  flex: 0 0 var(--div-size);
+  background: var(--divider);
+  cursor: ns-resize;
+  transition: background .15s;
+  position: relative;
+}
+#v-divider::after {
+  content: '';
+  position: absolute;
+  inset: -3px 0;
+}
+#v-divider:hover,
+#v-divider.dragging { background: var(--divider-hover); }
+
+/* ── Terminal section ────────────────────────────────────────── */
+#terminal-section {
+  flex: 4 1 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-term);
+  overflow: hidden;
+  min-height: 70px;
+}
+
+.clear-btn {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: rgba(248,239,216,.65);
+  font: 11px var(--font-ui);
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  transition: background .15s, color .15s;
+}
+.clear-btn:hover {
+  background: rgba(255,255,255,.18);
+  color: #F8EFD8;
+}
+
+/* ── Output log ──────────────────────────────────────────────── */
+#output-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0 4px;
+  font-family: var(--font-mono);
+}
+
+.output-entry {
+  padding: 4px 16px 10px;
+}
+
+.output-cmd-line {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.output-cmd-line .prompt-glyph {
+  color: var(--muted-light);
+  font-weight: 400;
+  user-select: none;
+}
+
+.output-result-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-left: 18px;
+  margin-bottom: 2px;
+}
+
+.result-mark {
+  font-size: 11px;
+  flex: 0 0 11px;
+  line-height: 1;
+}
+.result-mark.ok  { color: var(--success); }
+.result-mark.err { color: var(--error);   }
+
+.result-prop {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.result-error {
+  font-size: 12.5px;
+  color: var(--error);
+}
+
+.output-divider {
+  padding: 6px 16px 2px;
+  font-size: 11px;
+  color: var(--muted-light);
+  font-style: italic;
+  border-top: 1px solid var(--faint);
+  margin-top: 4px;
+}
+
+/* ── Input area ──────────────────────────────────────────────── */
+#input-area {
+  flex: 0 0 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-term);
+  gap: 10px;
+}
+
+.prompt {
+  font: 16px var(--font-mono);
+  color: var(--muted);
+  user-select: none;
+  line-height: 1;
+}
+
+#cmd-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font: 13.5px var(--font-mono);
+  color: var(--text);
+  caret-color: var(--accent);
+}
+#cmd-input::placeholder {
+  color: var(--muted-light);
+  font-style: italic;
+}
+
+/* ── Scrollbars ──────────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 6px; height: 6px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }

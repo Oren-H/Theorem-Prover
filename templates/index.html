@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PA Theorem Prover</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ── Header ──────────────────────────────────────────── -->
+  <header id="app-header">
+    <span class="header-title">Peano Arithmetic Theorem Prover</span>
+    <button class="header-btn" id="reset-btn" title="Clear all facts (Ctrl+Shift+R)">Reset</button>
+  </header>
+
+  <!-- ── Workspace ───────────────────────────────────────── -->
+  <div id="workspace">
+
+    <!-- Top: fact list  +  command reference -->
+    <div id="main-area">
+
+      <!-- Left: fact list -->
+      <div id="fact-panel">
+        <div class="panel-header">
+          <span>Facts</span>
+          <span class="panel-hint">click to insert #N</span>
+        </div>
+        <div id="fact-list">
+          <div class="fact-empty">No facts yet — enter a command below.</div>
+        </div>
+      </div>
+
+      <!-- Drag handle (horizontal) -->
+      <div id="h-divider" title="Drag to resize"></div>
+
+      <!-- Right: command reference -->
+      <div id="cmd-panel">
+        <div class="panel-header"><span>Commands</span></div>
+        <div id="cmd-reference">
+
+          <section class="ref-section">
+            <h3>Axioms</h3>
+
+            <div class="ref-item">
+              <div class="ref-sig">
+                <span class="ref-name">succ_not_zero</span><span class="ref-args">(n)</span>
+              </div>
+              <div class="ref-result">n++ &nbsp;≠&nbsp; 0</div>
+            </div>
+
+            <div class="ref-item">
+              <div class="ref-sig">
+                <span class="ref-name">succ_imp_eq</span><span class="ref-args">(n, m)</span>
+              </div>
+              <div class="ref-result">n++ = m++ &nbsp;⇒&nbsp; n = m</div>
+            </div>
+
+            <div class="ref-item">
+              <div class="ref-sig">
+                <span class="ref-name">add_zero_eq</span><span class="ref-args">(n)</span>
+              </div>
+              <div class="ref-result">n + 0 &nbsp;=&nbsp; n</div>
+            </div>
+
+            <div class="ref-item">
+              <div class="ref-sig">
+                <span class="ref-name">add_succ_eq</span><span class="ref-args">(n, m)</span>
+              </div>
+              <div class="ref-result">n + m++ &nbsp;=&nbsp; (n+m)++</div>
+            </div>
+          </section>
+
+          <section class="ref-section">
+            <h3>Inference Rules</h3>
+
+            <div class="ref-item">
+              <div class="ref-sig">
+                <span class="ref-name">cont</span><span class="ref-args">(L)</span>
+              </div>
+              <div class="ref-result">P ⇒ Q &nbsp;↦&nbsp; ¬Q ⇒ ¬P</div>
+            </div>
+
+            <div class="ref-item">
+              <div class="ref-sig">
+                <span class="ref-name">mp</span><span class="ref-args">(P, L)</span>
+              </div>
+              <div class="ref-result">P,&nbsp; P ⇒ Q &nbsp;⊢&nbsp; Q</div>
+            </div>
+
+            <div class="ref-item">
+              <div class="ref-sig">
+                <span class="ref-name">flip</span><span class="ref-args">(P)</span>
+              </div>
+              <div class="ref-result">p = r &nbsp;↦&nbsp; r = p &nbsp;(also ≠)</div>
+            </div>
+          </section>
+
+          <section class="ref-section">
+            <h3>Notation</h3>
+            <table class="ref-table">
+              <tr>
+                <td><code>0, 1, 2, …</code></td>
+                <td>integer → Num</td>
+              </tr>
+              <tr>
+                <td><code>0++, (0++)++</code></td>
+                <td>successor notation</td>
+              </tr>
+              <tr>
+                <td><code>#N</code></td>
+                <td>reference fact N</td>
+              </tr>
+            </table>
+          </section>
+
+          <section class="ref-section">
+            <h3>Shortcuts</h3>
+            <div class="shortcut-row"><kbd>Enter</kbd><span>submit command</span></div>
+            <div class="shortcut-row"><kbd>↑</kbd><kbd>↓</kbd><span>command history</span></div>
+            <div class="shortcut-row"><kbd>Ctrl+Shift+R</kbd><span>reset session</span></div>
+            <div class="shortcut-row"><span class="shortcut-click">click fact</span><span>insert #N</span></div>
+          </section>
+
+        </div><!-- #cmd-reference -->
+      </div><!-- #cmd-panel -->
+
+    </div><!-- #main-area -->
+
+    <!-- Drag handle (vertical) -->
+    <div id="v-divider" title="Drag to resize"></div>
+
+    <!-- Bottom: terminal -->
+    <div id="terminal-section">
+      <div class="panel-header">
+        <span>Terminal</span>
+        <button class="clear-btn" id="clear-btn" title="Clear output">Clear</button>
+      </div>
+      <div id="output-log"></div>
+      <div id="input-area">
+        <span class="prompt">⊢</span>
+        <input
+          type="text"
+          id="cmd-input"
+          autocomplete="off"
+          spellcheck="false"
+          autocorrect="off"
+          autocapitalize="off"
+          placeholder="enter command…"
+        />
+      </div>
+    </div>
+
+  </div><!-- #workspace -->
+</div><!-- #app -->
+
+<script src="/static/app.js"></script>
+</body>
+</html>

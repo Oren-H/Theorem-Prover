@@ -63,15 +63,17 @@ def main() -> None:
         run_repl()
         return
 
-    # Default: try Textual TUI, fall back to REPL if not installed.
-    try:
-        from theorem_prover.ui import run_ui
-        run_ui()
-    except ImportError:
-        print("Textual not found. Falling back to plain REPL.")
-        print("Install with:  pip install textual\n")
-        from theorem_prover.repl import run_repl
-        run_repl()
+    if "--tui" in args:
+        try:
+            from theorem_prover.ui import run_ui
+            run_ui()
+        except ImportError:
+            print("Textual not found.  pip install textual")
+        return
+
+    # Default: web app
+    from server import run_server
+    run_server()
 
 
 if __name__ == "__main__":

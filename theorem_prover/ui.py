@@ -3,178 +3,329 @@ Textual TUI for the PA Theorem Prover.
 
 Layout
 ------
-┌─────────────────────────────────────────────────────────┐
-│  PA Theorem Prover                          [Header]    │
-├──────────────────────────────┬──────────────────────────┤
-│  Fact List                   │  Session Output          │
-│  ─────────────────           │  ───────────────         │
-│  #1  0++ ≠ 0                 │  > succ_not_zero(0)      │
-│  #2  0 ≠ 0++                 │    ✓  0++ ≠ 0            │
-│  …                           │  > …                     │
-│                              │                          │
-├──────────────────────────────┴──────────────────────────┤
-│  ⊢ _                                        [Input]     │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│            Peano Arithmetic Theorem Prover               │
+├────────────────────────┬─────────────────────────────────┤
+│  Facts                 │  Commands                       │
+│                        │                                 │
+│  #1  0++ ≠ 0           │  succ_not_zero(n)   n++ ≠ 0    │
+│  #2  0 ≠ 0++           │  …                              │
+│                        │                                 │
+├────────────────────────┴─────────────────────────────────┤
+│  Terminal                                                │
+│  > succ_not_zero(0)                                      │
+│    ✓  0++ ≠ 0                                            │
+│  ⊢ _                                                     │
+└──────────────────────────────────────────────────────────┘
 
 Interactions
 ------------
-- Click a fact row to copy it as a #N reference into the input.
-- Type commands exactly as in the REPL; errors appear inline.
-- F1 / ? : toggle help overlay
+- Click a fact row to insert its #N reference into the input.
 - Ctrl+R : reset session
-- Ctrl+C / q : quit
+- Ctrl+Q : quit
 """
 from __future__ import annotations
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import (
-    Header,
-    Footer,
-    Input,
-    RichLog,
-    DataTable,
-    Static,
-)
-from textual.containers import Horizontal, Vertical
+from textual.widgets import Input, RichLog, DataTable, Static
+from textual.containers import Horizontal, Vertical, ScrollableContainer
 from textual.screen import ModalScreen
 
 from .commands import fact_list, reset_session
 from .display import display_prop
 from .parser import parse_and_run
 from .errors import InvalidCommand, InvalidInput, TypeMismatch
-from .types import Zero, Succ, Add
 
 
-HELP_TEXT = """\
-[bold]PA Theorem Prover — Command Reference[/bold]
+# ---------------------------------------------------------------------------
+# Color palette — warm tan / parchment
+# ---------------------------------------------------------------------------
+# bg_base     #EDE0C8   main background
+# bg_panel    #E3D2B0   slightly darker panel
+# bg_term     #F7F0E0   terminal / input area (lightest)
+# border      #C8AD87   divider lines
+# text        #3A2B1A   primary dark-brown text
+# accent      #7A5C38   medium brown (labels, prompt)
+# muted       #A8946E   subdued text
+# success     #4D7A5A   muted green
+# error       #8C3A3A   muted red
+# ---------------------------------------------------------------------------
 
-[bold yellow]Axioms[/bold yellow]
-  succ_not_zero(n)      n++ ≠ 0
-  succ_imp_eq(n, m)     n++ = m++ ⇒ n = m
-  add_zero_eq(n)        n + 0 = n
-  add_succ_eq(n, m)     n + m++ = (n+m)++
+_TAN_CSS = """
+/* ── Screen ─────────────────────────────────────────── */
+Screen {
+    background: #EDE0C8;
+    layout: vertical;
+}
 
-[bold yellow]Inference rules[/bold yellow]
-  cont(L)               contrapositive of implication L  (P⇒Q  ↦  ¬Q⇒¬P)
-  mp(P, L)              modus ponens: P, P⇒Q ⊢ Q
-  flip(P)               symmetry:  p = r  ↦  r = p  (also Neq)
+/* ── Title bar ───────────────────────────────────────── */
+#title-bar {
+    height: 2;
+    background: #B89B6E;
+    color: #1E1208;
+    content-align: center middle;
+    text-style: bold;
+}
 
-[bold yellow]Input notation[/bold yellow]
-  0, 1, 2, …            integer literals (auto-converted to Num)
-  0++, (0++)++, …       successor notation
-  #N                    reference fact N from the fact list
+/* ── Main panels (top portion) ───────────────────────── */
+#main-area {
+    layout: horizontal;
+    height: 3fr;
+}
 
-[bold yellow]Keyboard shortcuts[/bold yellow]
-  F1 / ?                toggle this help panel
-  Ctrl+R                reset session (clear all facts)
-  Ctrl+Q / q            quit
-  Enter                 submit command
-  Click a fact row      insert #N reference into the input field
+/* Fact list — left */
+#fact-panel {
+    width: 1fr;
+    background: #EDE0C8;
+    border-right: solid #C8AD87;
+    padding: 1 3 0 3;
+}
+
+#fact-label {
+    color: #5C3D1E;
+    text-style: bold;
+    height: 2;
+    content-align: left middle;
+    border-bottom: solid #C8AD87;
+    margin-bottom: 1;
+}
+
+DataTable {
+    background: #EDE0C8;
+    color: #1E1208;
+    height: 1fr;
+}
+
+DataTable > .datatable--header {
+    background: #D4B896;
+    color: #1E1208;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: #C8AD87;
+    color: #1E1208;
+    text-style: bold;
+}
+
+DataTable > .datatable--even-row {
+    background: #EDE0C8;
+}
+
+DataTable > .datatable--odd-row {
+    background: #E6D4B2;
+}
+
+/* Command reference — right */
+#cmd-panel {
+    width: 1fr;
+    background: #E3D2B0;
+    padding: 1 3 0 3;
+}
+
+#cmd-label {
+    color: #5C3D1E;
+    text-style: bold;
+    height: 2;
+    content-align: left middle;
+    border-bottom: solid #C8AD87;
+    margin-bottom: 1;
+}
+
+#cmd-scroll {
+    height: 1fr;
+    background: #E3D2B0;
+}
+
+#cmd-content {
+    background: #E3D2B0;
+    color: #1E1208;
+    padding: 0 0 1 0;
+}
+
+/* ── Terminal section (bottom) ───────────────────────── */
+#terminal-section {
+    height: 2fr;
+    layout: vertical;
+    border-top: solid #C8AD87;
+    background: #F5ECD7;
+}
+
+#terminal-label {
+    height: 2;
+    background: #D4B896;
+    color: #5C3D1E;
+    text-style: bold;
+    padding: 0 2;
+    content-align: left middle;
+}
+
+#output-log {
+    height: 1fr;
+    background: #F5ECD7;
+    color: #1E1208;
+    padding: 1 3;
+}
+
+Input {
+    background: #F5ECD7;
+    color: #1E1208;
+    border-top: solid #C8AD87;
+    border-bottom: none;
+    border-left: none;
+    border-right: none;
+    padding: 0 3;
+    height: 3;
+}
+
+Input:focus {
+    border-top: solid #5C3D1E;
+    border-bottom: none;
+    border-left: none;
+    border-right: none;
+    background: #F5ECD7;
+}
+
+Input>.input--placeholder {
+    color: #B09060;
+}
+"""
+
+# ---------------------------------------------------------------------------
+# Command reference content (static right panel)
+# ---------------------------------------------------------------------------
+
+_CMD_REFERENCE = """\
+[bold #5C3D1E]  AXIOMS[/bold #5C3D1E]
+
+
+  [bold #1E1208]succ_not_zero[/bold #1E1208](n)
+    [#7A5C38]n++  ≠  0[/#7A5C38]
+
+  [bold #1E1208]succ_imp_eq[/bold #1E1208](n, m)
+    [#7A5C38]n++ = m++  ⇒  n = m[/#7A5C38]
+
+  [bold #1E1208]add_zero_eq[/bold #1E1208](n)
+    [#7A5C38]n + 0  =  n[/#7A5C38]
+
+  [bold #1E1208]add_succ_eq[/bold #1E1208](n, m)
+    [#7A5C38]n + m++  =  (n+m)++[/#7A5C38]
+
+
+[bold #5C3D1E]  INFERENCE RULES[/bold #5C3D1E]
+
+
+  [bold #1E1208]cont[/bold #1E1208](L)
+    [#7A5C38]P ⇒ Q   ↦   ¬Q ⇒ ¬P[/#7A5C38]
+
+  [bold #1E1208]mp[/bold #1E1208](P, L)
+    [#7A5C38]P,  P ⇒ Q   ⊢   Q[/#7A5C38]
+
+  [bold #1E1208]flip[/bold #1E1208](P)
+    [#7A5C38]p = r   ↦   r = p   (also ≠)[/#7A5C38]
+
+
+[bold #5C3D1E]  NOTATION[/bold #5C3D1E]
+
+
+  [#7A5C38]0, 1, 2, …      integer  →  Num
+  0++, (0++)++    successor
+  #N              reference fact N[/#7A5C38]
+
+
+[bold #5C3D1E]  SHORTCUTS[/bold #5C3D1E]
+
+
+  [#7A5C38]Ctrl+R     reset session
+  Ctrl+Q     quit
+  [ / ]      resize fact panel
+  click row  insert #N[/#7A5C38]
 """
 
 
-class HelpScreen(ModalScreen):
-    BINDINGS = [Binding("escape,f1,question_mark", "dismiss", "Close")]
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
 
-    def compose(self) -> ComposeResult:
-        yield Static(HELP_TEXT, id="help-content")
-
-    def on_mount(self) -> None:
-        self.query_one("#help-content").styles.padding = (1, 2)
-        self.query_one("#help-content").styles.background = "black"
-        self.query_one("#help-content").styles.border = ("round", "yellow")
-        self.query_one("#help-content").styles.width = "70%"
-        self.query_one("#help-content").styles.height = "auto"
-        self.query_one("#help-content").styles.margin = (4, 0)
-        self.query_one("#help-content").styles.align = ("center", "middle")
+# Fact-panel width steps (percentage of screen width)
+_PANEL_WIDTHS = [20, 25, 30, 35, 40, 45, 50, 55, 60]
+_DEFAULT_WIDTH_IDX = 4  # 40%
 
 
 class TheoremProverApp(App):
-    CSS = """
-    Screen {
-        layout: vertical;
-    }
-
-    #main-area {
-        layout: horizontal;
-        height: 1fr;
-    }
-
-    #fact-panel {
-        width: 40%;
-        border: solid $accent;
-        padding: 0 1;
-    }
-
-    #fact-panel-title {
-        text-style: bold;
-        color: $accent;
-        padding: 0 0 1 0;
-    }
-
-    #fact-table {
-        height: 1fr;
-    }
-
-    #output-panel {
-        width: 60%;
-        border: solid $accent;
-        padding: 0 1;
-    }
-
-    #output-panel-title {
-        text-style: bold;
-        color: $accent;
-        padding: 0 0 1 0;
-    }
-
-    #output-log {
-        height: 1fr;
-    }
-
-    #input-bar {
-        height: 3;
-        padding: 0 1;
-        border-top: solid $accent;
-    }
-
-    #cmd-input {
-        width: 1fr;
-    }
-    """
+    CSS = _TAN_CSS
 
     BINDINGS = [
         Binding("ctrl+r", "reset_session", "Reset"),
-        Binding("f1,question_mark", "show_help", "Help"),
         Binding("ctrl+q", "quit", "Quit"),
+        Binding("[", "shrink_facts", "◀ Facts"),
+        Binding("]", "grow_facts", "Facts ▶"),
     ]
 
     TITLE = "PA Theorem Prover"
-    SUB_TITLE = "Peano Arithmetic  |  F1 for help"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._panel_idx = _DEFAULT_WIDTH_IDX
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield Static("Peano Arithmetic Theorem Prover", id="title-bar")
+
         with Horizontal(id="main-area"):
+            # Left: fact list
             with Vertical(id="fact-panel"):
-                yield Static("Fact List", id="fact-panel-title")
-                yield DataTable(id="fact-table", cursor_type="row", zebra_stripes=True)
-            with Vertical(id="output-panel"):
-                yield Static("Session Output", id="output-panel-title")
-                yield RichLog(id="output-log", highlight=True, markup=True, wrap=True)
-        with Horizontal(id="input-bar"):
-            yield Input(placeholder="Enter command… (F1 for help)", id="cmd-input")
-        yield Footer()
+                yield Static("Facts", id="fact-label")
+                yield DataTable(
+                    id="fact-table",
+                    cursor_type="row",
+                    zebra_stripes=True,
+                    show_header=False,
+                )
+
+            # Right: command reference
+            with Vertical(id="cmd-panel"):
+                yield Static("Commands", id="cmd-label")
+                with ScrollableContainer(id="cmd-scroll"):
+                    yield Static(_CMD_REFERENCE, id="cmd-content", markup=True)
+
+        # Bottom: terminal
+        with Vertical(id="terminal-section"):
+            yield Static("Terminal", id="terminal-label")
+            yield RichLog(
+                id="output-log",
+                highlight=False,
+                markup=True,
+                wrap=True,
+            )
+            yield Input(placeholder="⊢  enter command…", id="cmd-input")
 
     def on_mount(self) -> None:
         table = self.query_one("#fact-table", DataTable)
-        table.add_columns("#", "Proposition")
-        log = self.query_one("#output-log", RichLog)
-        log.write("[dim]Session started. Type a command and press Enter.[/dim]")
+        table.add_columns("", "Proposition")
+        self._apply_panel_width()
         self.query_one("#cmd-input", Input).focus()
 
     # -----------------------------------------------------------------------
-    # Input handling
+    # Panel resize
+    # -----------------------------------------------------------------------
+
+    def _apply_panel_width(self) -> None:
+        w = _PANEL_WIDTHS[self._panel_idx]
+        self.query_one("#fact-panel").styles.width = f"{w}%"
+
+    def action_shrink_facts(self) -> None:
+        if self._panel_idx > 0:
+            self._panel_idx -= 1
+            self._apply_panel_width()
+
+    def action_grow_facts(self) -> None:
+        if self._panel_idx < len(_PANEL_WIDTHS) - 1:
+            self._panel_idx += 1
+            self._apply_panel_width()
+
+    # -----------------------------------------------------------------------
+    # Command submission
     # -----------------------------------------------------------------------
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -185,67 +336,47 @@ class TheoremProverApp(App):
         inp = self.query_one("#cmd-input", Input)
         inp.value = ""
 
-        log.write(f"[bold cyan]⊢ {raw}[/bold cyan]")
+        log.write(f"[bold #5C3D1E]⊢  {raw}[/bold #5C3D1E]")
 
-        # Built-in meta-commands
         if raw.lower() in ("quit", "exit", "q"):
             self.exit()
-            return
-        if raw.lower() in ("help", "?"):
-            self.action_show_help()
             return
         if raw.lower() == "reset":
             self.action_reset_session()
             return
-        if raw.lower() == "list":
-            if not fact_list:
-                log.write("[dim]  (no facts yet)[/dim]")
-            else:
-                for i, p in enumerate(fact_list, 1):
-                    log.write(f"  [green]#{i}[/green]  {display_prop(p)}")
-            return
 
-        # Parse and evaluate
         n_before = len(fact_list)
         try:
-            result = parse_and_run(raw)
+            parse_and_run(raw)
         except InvalidCommand as e:
-            log.write(f"[red bold][unknown command][/red bold]  {e}")
+            log.write(f"  [bold #8C3A3A]✗[/bold #8C3A3A]  [#8C3A3A]unknown command —  {e}[/#8C3A3A]")
             return
         except InvalidInput as e:
-            log.write(f"[red bold][invalid input][/red bold]  {e}")
+            log.write(f"  [bold #8C3A3A]✗[/bold #8C3A3A]  [#8C3A3A]invalid input —  {e}[/#8C3A3A]")
             return
         except TypeMismatch as e:
-            log.write(f"[red bold][type mismatch][/red bold]  {e}")
+            log.write(f"  [bold #8C3A3A]✗[/bold #8C3A3A]  [#8C3A3A]type mismatch —  {e}[/#8C3A3A]")
             return
         except Exception as e:
-            log.write(f"[red bold][error][/red bold]  {e}")
+            log.write(f"  [bold #8C3A3A]✗[/bold #8C3A3A]  [#8C3A3A]{e}[/#8C3A3A]")
             return
 
-        # Display all newly added facts
         new_facts = fact_list[n_before:]
         for prop in new_facts:
-            log.write(f"  [green]✓[/green]  {display_prop(prop)}")
+            log.write(
+                f"  [bold #4D7A5A]✓[/bold #4D7A5A]  "
+                f"[bold #1E1208]{display_prop(prop)}[/bold #1E1208]"
+            )
 
-        # Refresh the fact table
         self._refresh_fact_table()
-        log.write("")
-
-    def _refresh_fact_table(self) -> None:
-        table = self.query_one("#fact-table", DataTable)
-        table.clear()
-        for i, prop in enumerate(fact_list, 1):
-            table.add_row(f"#{i}", display_prop(prop), key=str(i))
 
     # -----------------------------------------------------------------------
-    # Fact table click → insert reference
+    # Fact table click → insert #N reference
     # -----------------------------------------------------------------------
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Click a fact row to insert its #N reference into the input."""
         inp = self.query_one("#cmd-input", Input)
         ref = f"#{event.row_key.value}"
-        # Insert at cursor position or append.
         cursor = inp.cursor_position
         current = inp.value
         inp.value = current[:cursor] + ref + current[cursor:]
@@ -260,12 +391,14 @@ class TheoremProverApp(App):
         reset_session()
         self._refresh_fact_table()
         log = self.query_one("#output-log", RichLog)
-        log.write("[yellow]── Session reset ──[/yellow]")
+        log.write("[#B09060]──  session reset  ──[/#B09060]")
 
-    def action_show_help(self) -> None:
-        self.push_screen(HelpScreen())
+    def _refresh_fact_table(self) -> None:
+        table = self.query_one("#fact-table", DataTable)
+        table.clear()
+        for i, prop in enumerate(fact_list, 1):
+            table.add_row(f"#{i}", display_prop(prop), key=str(i))
 
 
 def run_ui() -> None:
-    app = TheoremProverApp()
-    app.run()
+    TheoremProverApp().run()
