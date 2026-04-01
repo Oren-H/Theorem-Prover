@@ -141,15 +141,25 @@
       <div id="output-log"></div>
       <div id="input-area">
         <span class="prompt">⊢</span>
-        <input
-          type="text"
-          id="cmd-input"
-          autocomplete="off"
-          spellcheck="false"
-          autocorrect="off"
-          autocapitalize="off"
-          placeholder="enter command…"
-        />
+        <div id="input-wrap">
+          <!-- Completion dropdown (rendered above the input) -->
+          <div id="ac-dropdown" aria-live="polite" style="display:none"></div>
+          <!--
+            Contenteditable div acts as the text input.
+            The ghost-completion span is appended inside it by JS so it lives
+            in the same rendering context — no alignment offset possible.
+          -->
+          <div
+            id="cmd-input"
+            contenteditable="true"
+            role="textbox"
+            aria-label="Command input"
+            spellcheck="false"
+            autocorrect="off"
+            autocapitalize="off"
+            data-placeholder="enter command…"
+          ></div>
+        </div>
       </div>
     </div>
 

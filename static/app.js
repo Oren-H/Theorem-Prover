@@ -4,17 +4,125 @@
 
 "use strict";
 
-// ── State ────────────────────────────────────────────────────
-let cmdHistory = [];
-let historyIdx = -1;
-let pendingInput = "";          // saved while navigating history
+// ── Command definitions (autocomplete) ───────────────────────
+const CMD_DEFS = [
+  { name: "succ_not_zero", params: "n",    hint: "n++ ≠ 0"        },
+  { name: "succ_imp_eq",   params: "n, m", hint: "n++=m++ ⇒ n=m"  },
+  { name: "add_zero_eq",   params: "n",    hint: "n + 0 = n"       },
+  { name: "add_succ_eq",   params: "n, m", hint: "n+m++ = (n+m)++" },
+  { name: "cont",          params: "L",    hint: "P⇒Q ↦ ¬Q⇒¬P"    },
+  { name: "mp",            params: "P, L", hint: "P, P⇒Q ⊢ Q"     },
+  { name: "flip",          params: "P",    hint: "p=r ↦ r=p"       },
+];
 
-// ── DOM refs ─────────────────────────────────────────────────
-const factListEl  = () => document.getElementById("fact-list");
-const outputLogEl = () => document.getElementById("output-log");
-const cmdInputEl  = () => document.getElementById("cmd-input");
+// ── History / autocomplete state ─────────────────────────────
+let cmdHistory  = [];
+let historyIdx  = -1;
+let pendingInput = "";
+let ac = { matches: [], idx: 0, prefix: "" };
 
-// ── API helpers ───────────────────────────────────────────────
+// ── DOM helpers ───────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const cmdEl      = () => $("cmd-input");   // the contenteditable div
+const factListEl = () => $("fact-list");
+const outputEl   = () => $("output-log");
+const acDdEl     = () => $("ac-dropdown");
+
+// ── HTML escape ───────────────────────────────────────────────
+function esc(s) {
+  return String(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ============================================================
+// ── Contenteditable value helpers ────────────────────────────
+// ============================================================
+// Invariant: #cmd-input always contains exactly one Text node
+// (possibly empty) followed by an optional .ghost-span element.
+// All setters maintain this invariant.
+
+/** Return the typed text — everything except the ghost span. */
+function getVal() {
+  const el = cmdEl();
+  let text = "";
+  el.childNodes.forEach(n => {
+    if (n.nodeType === Node.TEXT_NODE) text += n.textContent;
+    // ghost-span (Element) is intentionally skipped
+  });
+  return text;
+}
+
+/** Replace typed text; cursor moves to end; ghost span preserved. */
+function setVal(text) {
+  const el    = cmdEl();
+  const ghost = el.querySelector(".ghost-span");
+  if (ghost) ghost.remove();
+  el.textContent = text;           // replaces all child nodes with a Text node
+  if (ghost) el.appendChild(ghost);
+  _moveCursorToEnd();
+  _updatePlaceholder();
+}
+
+/** Is the caret at the very end of the typed text (before the ghost span)? */
+function isAtEnd() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !sel.isCollapsed) return false;
+  const { startContainer, startOffset } = sel.getRangeAt(0);
+  const el = cmdEl();
+  // Text node case: caret must be at end of the first text node.
+  if (startContainer.nodeType === Node.TEXT_NODE && startContainer.parentNode === el) {
+    return startOffset === startContainer.textContent.length;
+  }
+  // Element case: caret is positioned between child nodes in the div.
+  // offset 0 = before all children; offset >= 1 = after the text node (= at end).
+  if (startContainer === el) {
+    return startOffset >= 1 || getVal().length === 0;
+  }
+  return false;
+}
+
+function _moveCursorToEnd() {
+  const el   = cmdEl();
+  const sel  = window.getSelection();
+  const range = document.createRange();
+  // Place cursor at end of first text node (before ghost span).
+  const textNode = [...el.childNodes].find(n => n.nodeType === Node.TEXT_NODE);
+  if (textNode) {
+    range.setStart(textNode, textNode.textContent.length);
+  } else {
+    range.setStart(el, 0);
+  }
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function _updatePlaceholder() {
+  const el = cmdEl();
+  if (getVal().length > 0) {
+    el.setAttribute("data-has-text", "");
+  } else {
+    el.removeAttribute("data-has-text");
+  }
+}
+
+// ── Ghost span (inside #cmd-input) ───────────────────────────
+function _ghostSpan() { return cmdEl().querySelector(".ghost-span"); }
+
+function setGhostSpan(suffix) {
+  let ghost = _ghostSpan();
+  if (!suffix) { if (ghost) ghost.remove(); return; }
+  if (!ghost) {
+    ghost = document.createElement("span");
+    ghost.className = "ghost-span";
+    ghost.setAttribute("contenteditable", "false");
+    cmdEl().appendChild(ghost);
+  }
+  ghost.textContent = suffix;
+}
+
+// ============================================================
+// ── API ──────────────────────────────────────────────────────
 async function apiPost(path, body = {}) {
   const res = await fetch(path, {
     method: "POST",
@@ -24,38 +132,19 @@ async function apiPost(path, body = {}) {
   return res.json();
 }
 
-// ── HTML escaping ─────────────────────────────────────────────
-function esc(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
 // ── Fact list ─────────────────────────────────────────────────
 function renderFacts(facts, newIds = new Set()) {
   const list = factListEl();
-
   if (!facts.length) {
     list.innerHTML = '<div class="fact-empty">No facts yet — enter a command below.</div>';
     return;
   }
-
-  // Build a map of existing items so we can avoid a full re-render.
   const existing = new Map();
-  list.querySelectorAll(".fact-item").forEach(el => {
-    existing.set(Number(el.dataset.id), el);
-  });
-
-  // Remove items that are no longer present (e.g. after reset).
-  if (facts.length < existing.size) {
-    list.innerHTML = "";
-    existing.clear();
-  }
+  list.querySelectorAll(".fact-item").forEach(el => existing.set(+el.dataset.id, el));
+  if (facts.length < existing.size) { list.innerHTML = ""; existing.clear(); }
 
   facts.forEach(fact => {
-    if (existing.has(fact.id)) return;           // already rendered
-
+    if (existing.has(fact.id)) return;
     const item = document.createElement("div");
     item.className = "fact-item" + (newIds.has(fact.id) ? " new" : "");
     item.dataset.id = fact.id;
@@ -65,104 +154,277 @@ function renderFacts(facts, newIds = new Set()) {
     item.addEventListener("click", () => insertRef(fact.id));
     list.appendChild(item);
   });
-
-  // Scroll to bottom if new facts were added.
   if (newIds.size) list.scrollTop = list.scrollHeight;
 }
 
 function insertRef(id) {
-  const input = cmdInputEl();
-  const ref   = `#${id}`;
-  const s     = input.selectionStart;
-  const e2    = input.selectionEnd;
-  input.value = input.value.slice(0, s) + ref + input.value.slice(e2);
-  input.selectionStart = input.selectionEnd = s + ref.length;
-  input.focus();
+  const ref = `#${id}`;
+  cmdEl().focus();
+  // Insert at caret position using execCommand (works in contenteditable).
+  document.execCommand("insertText", false, ref);
+  updateHints();
 }
 
 // ── Output log ────────────────────────────────────────────────
 function appendEntry(command, response) {
-  const log   = outputLogEl();
   const entry = document.createElement("div");
   entry.className = "output-entry";
-
-  let html =
-    `<div class="output-cmd-line">` +
-    `<span class="prompt-glyph">⊢</span>${esc(command)}` +
-    `</div>`;
-
+  let html = `<div class="output-cmd-line"><span class="prompt-glyph">⊢</span>${esc(command)}</div>`;
   if (response.ok) {
     response.new_facts.forEach(prop => {
-      html +=
-        `<div class="output-result-line">` +
-        `<span class="result-mark ok">✓</span>` +
-        `<span class="result-prop">${esc(prop)}</span>` +
-        `</div>`;
+      html += `<div class="output-result-line"><span class="result-mark ok">✓</span><span class="result-prop">${esc(prop)}</span></div>`;
     });
   } else {
-    const label = {
-      unknown_command: "unknown command",
-      invalid_input:   "invalid input",
-      type_mismatch:   "type mismatch",
-    }[response.error_type] ?? "error";
-
-    html +=
-      `<div class="output-result-line">` +
-      `<span class="result-mark err">✗</span>` +
-      `<span class="result-error">${label} — ${esc(response.error)}</span>` +
-      `</div>`;
+    const label = { unknown_command: "unknown command", invalid_input: "invalid input",
+                    type_mismatch: "type mismatch" }[response.error_type] ?? "error";
+    html += `<div class="output-result-line"><span class="result-mark err">✗</span><span class="result-error">${label} — ${esc(response.error)}</span></div>`;
   }
-
   entry.innerHTML = html;
-  log.appendChild(entry);
-  log.scrollTop = log.scrollHeight;
+  outputEl().appendChild(entry);
+  outputEl().scrollTop = outputEl().scrollHeight;
 }
 
 function appendDivider(text) {
-  const log = outputLogEl();
-  const el  = document.createElement("div");
+  const el = document.createElement("div");
   el.className = "output-divider";
   el.textContent = text;
-  log.appendChild(el);
-  log.scrollTop = log.scrollHeight;
+  outputEl().appendChild(el);
+  outputEl().scrollTop = outputEl().scrollHeight;
 }
 
 // ── Command submission ────────────────────────────────────────
 async function submitCommand() {
-  const input = cmdInputEl();
-  const raw   = input.value.trim();
+  const raw = getVal().trim();
   if (!raw) return;
 
-  // History
   if (cmdHistory[cmdHistory.length - 1] !== raw) cmdHistory.push(raw);
   historyIdx  = -1;
   pendingInput = "";
-  input.value = "";
+  setVal("");
+  setGhostSpan("");
+  acDdEl().style.display = "none";
+  ac = { matches: [], idx: 0, prefix: "" };
 
-  // Meta-commands
   if (raw.toLowerCase() === "reset") {
-    const data = await apiPost("/api/reset");
+    await apiPost("/api/reset");
     appendDivider("── session reset ──");
     renderFacts([], new Set());
     return;
   }
 
-  // Run
-  const n_before_unknown = document.querySelectorAll(".fact-item").length;
   const data = await apiPost("/api/run", { command: raw });
   appendEntry(raw, data);
-
   if (data.ok) {
     const newIds = new Set(data.facts.slice(-data.new_facts.length).map(f => f.id));
     renderFacts(data.facts, newIds);
   }
 }
 
-// ── Keyboard handling ─────────────────────────────────────────
-function initInput() {
-  const input = cmdInputEl();
+// ============================================================
+// ── Autocomplete engine ──────────────────────────────────────
+// ============================================================
 
-  input.addEventListener("keydown", e => {
+function getInnerCall(text, pos) {
+  let depth = 0;
+  for (let i = pos - 1; i >= 0; i--) {
+    if (text[i] === ")") { depth++; continue; }
+    if (text[i] === "(") {
+      if (depth > 0) { depth--; continue; }
+      const m = text.slice(0, i).match(/([A-Za-z_][A-Za-z0-9_]*)$/);
+      if (!m) return null;
+      const cmd = CMD_DEFS.find(c => c.name === m[1]);
+      if (!cmd) return null;
+      const inside = text.slice(i + 1, pos);
+      let d = 0, argIdx = 0;
+      for (const c of inside) {
+        if (c === "(") d++;
+        else if (c === ")") d--;
+        else if (c === "," && d === 0) argIdx++;
+      }
+      return { cmd, argIdx };
+    }
+  }
+  return null;
+}
+
+function getPrefix(text, pos) {
+  const m = text.slice(0, pos).match(/([A-Za-z_][A-Za-z0-9_]*)$/);
+  return m ? m[1] : "";
+}
+
+function renderDropdown(mode, payload) {
+  const dd = acDdEl();
+  if (mode === "list") {
+    const { matches, selected } = payload;
+    let html = matches.map((c, i) =>
+      `<div class="ac-item${i === selected ? " selected" : ""}" data-idx="${i}">` +
+      `<span class="ac-name">${esc(c.name)}</span>` +
+      `<span class="ac-params">(${esc(c.params)})</span>` +
+      `<span class="ac-hint">${esc(c.hint)}</span></div>`
+    ).join("");
+    html += `<div class="ac-tab-hint"><kbd>Tab</kbd> ${matches.length > 1 ? "cycle" : "accept"} &nbsp;·&nbsp; <kbd>→</kbd> accept</div>`;
+    dd.innerHTML = html;
+    dd.style.display = "block";
+    dd.querySelectorAll(".ac-item").forEach(el => {
+      el.addEventListener("mousedown", e => { e.preventDefault(); applyCompletion(matches[+el.dataset.idx]); });
+    });
+  } else if (mode === "sig") {
+    const { cmd, argIdx } = payload;
+    const paramsHtml = cmd.params.split(",").map((p, i) =>
+      `<span class="sig-param${i === argIdx ? " active" : ""}">${esc(p.trim())}</span>`
+    ).join(`<span class="sig-comma">, </span>`);
+    dd.innerHTML =
+      `<div class="sig-help"><span class="sig-name">${esc(cmd.name)}</span>` +
+      `<span class="sig-paren">(</span>${paramsHtml}<span class="sig-paren">)</span>` +
+      `<span class="sig-hint">${esc(cmd.hint)}</span></div>`;
+    dd.style.display = "block";
+  } else {
+    dd.style.display = "none";
+  }
+}
+
+function updateHints() {
+  _updatePlaceholder();
+  const text = getVal();
+  const pos  = text.length;   // only show hints when cursor is at end
+
+  if (!isAtEnd()) { setGhostSpan(""); renderDropdown("none"); return; }
+
+  const prefix    = getPrefix(text, pos);
+  const innerCall = getInnerCall(text, pos);
+
+  if (prefix) {
+    const matches = CMD_DEFS.filter(c => c.name.startsWith(prefix) && c.name !== prefix);
+    if (matches.length > 0) {
+      if (ac.prefix !== prefix) { ac.idx = 0; ac.prefix = prefix; }
+      ac.matches = matches;
+      if (ac.idx >= matches.length) ac.idx = 0;
+      const best = matches[ac.idx];
+      setGhostSpan(best.name.slice(prefix.length) + "(" + best.params + ")");
+      renderDropdown("list", { matches, selected: ac.idx });
+      return;
+    }
+    const exact = CMD_DEFS.find(c => c.name === prefix);
+    if (exact && !text.endsWith("(")) {
+      setGhostSpan("(" + exact.params + ")");
+      renderDropdown("list", { matches: [exact], selected: 0 });
+      ac = { matches: [exact], idx: 0, prefix };
+      return;
+    }
+  }
+
+  if (innerCall) {
+    setGhostSpan("");
+    renderDropdown("sig", innerCall);
+    ac = { matches: [], idx: 0, prefix: "" };
+    return;
+  }
+
+  setGhostSpan("");
+  renderDropdown("none");
+  ac = { matches: [], idx: 0, prefix: "" };
+}
+
+function acceptGhost() {
+  const ghost = _ghostSpan();
+  if (!ghost || !ghost.textContent) return false;
+  const suffix = ghost.textContent;
+  setGhostSpan("");
+  ac = { matches: [], idx: 0, prefix: "" };
+  document.execCommand("insertText", false, suffix);
+  updateHints();
+  return true;
+}
+
+function applyCompletion(cmd) {
+  const text   = getVal();
+  const prefix = getPrefix(text, text.length);
+  const suffix = cmd.name.slice(prefix.length) + "(" + cmd.params + ")";
+  // Delete prefix then insert full completion
+  for (let i = 0; i < prefix.length; i++) document.execCommand("delete");
+  document.execCommand("insertText", false, cmd.name + "(" + cmd.params + ")");
+  setGhostSpan("");
+  ac = { matches: [], idx: 0, prefix: "" };
+  updateHints();
+}
+
+function cycleCompletion() {
+  if (!ac.matches.length) return false;
+  ac.idx = (ac.idx + 1) % ac.matches.length;
+  const best = ac.matches[ac.idx];
+  setGhostSpan(best.name.slice(ac.prefix.length) + "(" + best.params + ")");
+  acDdEl().querySelectorAll(".ac-item").forEach((el, i) =>
+    el.classList.toggle("selected", i === ac.idx));
+  return true;
+}
+
+// ── Resize ────────────────────────────────────────────────────
+function initHorizontalResize() {
+  const handle = $("h-divider"), factPanel = $("fact-panel"), mainArea = $("main-area");
+  let dragging = false, startX = 0, startW = 0;
+  handle.addEventListener("mousedown", e => {
+    dragging = true; startX = e.clientX; startW = factPanel.offsetWidth;
+    handle.classList.add("dragging");
+    document.body.style.cssText += ";cursor:ew-resize;user-select:none;";
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", e => {
+    if (!dragging) return;
+    factPanel.style.flex = `0 0 ${Math.max(130, Math.min(mainArea.offsetWidth - 135, startW + e.clientX - startX))}px`;
+  });
+  document.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false; handle.classList.remove("dragging");
+    document.body.style.cursor = ""; document.body.style.userSelect = "";
+  });
+}
+
+function initVerticalResize() {
+  const handle = $("v-divider"), mainArea = $("main-area"), terminal = $("terminal-section");
+  let dragging = false, startY = 0, startMainH = 0, startTermH = 0;
+  handle.addEventListener("mousedown", e => {
+    dragging = true; startY = e.clientY;
+    startMainH = mainArea.offsetHeight; startTermH = terminal.offsetHeight;
+    handle.classList.add("dragging");
+    document.body.style.cssText += ";cursor:ns-resize;user-select:none;";
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", e => {
+    if (!dragging) return;
+    const dy = e.clientY - startY;
+    mainArea.style.flex  = `0 0 ${Math.max(90, startMainH + dy)}px`;
+    terminal.style.flex  = `0 0 ${Math.max(70, startTermH - dy)}px`;
+  });
+  document.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false; handle.classList.remove("dragging");
+    document.body.style.cursor = ""; document.body.style.userSelect = "";
+  });
+}
+
+// ── Input init ────────────────────────────────────────────────
+function initInput() {
+  const el = cmdEl();
+
+  // Prevent newlines — contenteditable would insert <br> or <div> on Enter.
+  el.addEventListener("keydown", e => {
+
+    if (e.key === "Tab") {
+      e.preventDefault();
+      ac.matches.length > 1 ? cycleCompletion() : acceptGhost();
+      return;
+    }
+
+    if (e.key === "ArrowRight" && isAtEnd()) {
+      if (acceptGhost()) { e.preventDefault(); return; }
+    }
+
+    if (e.key === "Escape") {
+      setGhostSpan(""); acDdEl().style.display = "none";
+      ac = { matches: [], idx: 0, prefix: "" };
+      return;
+    }
+
     if (e.key === "Enter") {
       e.preventDefault();
       submitCommand();
@@ -171,15 +433,8 @@ function initInput() {
 
     if (e.key === "ArrowUp") {
       e.preventDefault();
-      if (historyIdx === -1) {
-        pendingInput = input.value;
-        historyIdx = cmdHistory.length;
-      }
-      if (historyIdx > 0) {
-        historyIdx--;
-        input.value = cmdHistory[historyIdx];
-        input.selectionStart = input.selectionEnd = input.value.length;
-      }
+      if (historyIdx === -1) { pendingInput = getVal(); historyIdx = cmdHistory.length; }
+      if (historyIdx > 0) { setVal(cmdHistory[--historyIdx]); updateHints(); }
       return;
     }
 
@@ -187,123 +442,45 @@ function initInput() {
       e.preventDefault();
       if (historyIdx === -1) return;
       historyIdx++;
-      if (historyIdx >= cmdHistory.length) {
-        historyIdx  = -1;
-        input.value = pendingInput;
-      } else {
-        input.value = cmdHistory[historyIdx];
-      }
-      input.selectionStart = input.selectionEnd = input.value.length;
+      setVal(historyIdx < cmdHistory.length ? cmdHistory[historyIdx] : (historyIdx = -1, pendingInput));
+      updateHints();
       return;
     }
   });
 
-  // Global shortcuts
+  // Strip HTML on paste — keep plain text only.
+  el.addEventListener("paste", e => {
+    e.preventDefault();
+    const text = (e.clipboardData || window.clipboardData).getData("text/plain");
+    document.execCommand("insertText", false, text);
+  });
+
+  // Update hints on every change.
+  el.addEventListener("input",  updateHints);
+  el.addEventListener("keyup",  updateHints);
+  el.addEventListener("click",  updateHints);
+
+  // Global: any printable key focuses the cmd div.
   document.addEventListener("keydown", e => {
-    // Ctrl+Shift+R → reset
-    if (e.ctrlKey && e.shiftKey && e.key === "R") {
-      e.preventDefault();
-      document.getElementById("reset-btn").click();
-    }
-    // Any printable key (not in an input) → focus cmd input
-    if (
-      !e.ctrlKey && !e.metaKey && !e.altKey &&
-      e.key.length === 1 &&
-      document.activeElement !== input
-    ) {
-      input.focus();
+    if (e.ctrlKey && e.shiftKey && e.key === "R") { e.preventDefault(); $("reset-btn").click(); }
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1 && document.activeElement !== el) {
+      el.focus(); _moveCursorToEnd();
     }
   });
 }
 
-// ── Resize: horizontal (fact vs cmd) ─────────────────────────
-function initHorizontalResize() {
-  const handle    = document.getElementById("h-divider");
-  const factPanel = document.getElementById("fact-panel");
-  const mainArea  = document.getElementById("main-area");
-  let dragging = false;
-  let startX = 0, startW = 0;
-
-  handle.addEventListener("mousedown", e => {
-    dragging = true;
-    startX   = e.clientX;
-    startW   = factPanel.offsetWidth;
-    handle.classList.add("dragging");
-    document.body.style.cssText += ";cursor:ew-resize;user-select:none;";
-    e.preventDefault();
-  });
-
-  document.addEventListener("mousemove", e => {
-    if (!dragging) return;
-    const dx    = e.clientX - startX;
-    const total = mainArea.offsetWidth;
-    const newW  = Math.max(130, Math.min(total - 135, startW + dx));
-    factPanel.style.flex = `0 0 ${newW}px`;
-  });
-
-  document.addEventListener("mouseup", () => {
-    if (!dragging) return;
-    dragging = false;
-    handle.classList.remove("dragging");
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-  });
-}
-
-// ── Resize: vertical (main vs terminal) ──────────────────────
-function initVerticalResize() {
-  const handle   = document.getElementById("v-divider");
-  const mainArea = document.getElementById("main-area");
-  const terminal = document.getElementById("terminal-section");
-  let dragging = false;
-  let startY = 0, startMainH = 0, startTermH = 0;
-
-  handle.addEventListener("mousedown", e => {
-    dragging    = true;
-    startY      = e.clientY;
-    startMainH  = mainArea.offsetHeight;
-    startTermH  = terminal.offsetHeight;
-    handle.classList.add("dragging");
-    document.body.style.cssText += ";cursor:ns-resize;user-select:none;";
-    e.preventDefault();
-  });
-
-  document.addEventListener("mousemove", e => {
-    if (!dragging) return;
-    const dy       = e.clientY - startY;
-    const newMainH = Math.max(90, startMainH + dy);
-    const newTermH = Math.max(70, startTermH - dy);
-    mainArea.style.flex = `0 0 ${newMainH}px`;
-    terminal.style.flex = `0 0 ${newTermH}px`;
-  });
-
-  document.addEventListener("mouseup", () => {
-    if (!dragging) return;
-    dragging = false;
-    handle.classList.remove("dragging");
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-  });
-}
-
-// ── Init ──────────────────────────────────────────────────────
+// ── Boot ─────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
-  // Buttons
-  document.getElementById("reset-btn").addEventListener("click", async () => {
-    const data = await apiPost("/api/reset");
+  $("reset-btn").addEventListener("click", async () => {
+    await apiPost("/api/reset");
     appendDivider("── session reset ──");
     renderFacts([], new Set());
   });
 
-  document.getElementById("clear-btn").addEventListener("click", () => {
-    outputLogEl().innerHTML = "";
-  });
+  $("clear-btn").addEventListener("click", () => { outputEl().innerHTML = ""; });
 
-  // Resize handles
   initHorizontalResize();
   initVerticalResize();
-
-  // Input
   initInput();
-  cmdInputEl().focus();
+  cmdEl().focus();
 });

@@ -439,18 +439,126 @@ kbd {
   line-height: 1;
 }
 
+/* Wrapper — dropdown is positioned relative to this */
+#input-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+/*
+  Contenteditable div replaces <input>.
+  Ghost span lives INSIDE it, so there is no cross-element alignment to fight.
+*/
 #cmd-input {
   flex: 1;
-  background: transparent;
-  border: none;
+  min-width: 0;
   outline: none;
   font: 13.5px var(--font-mono);
   color: var(--text);
   caret-color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: text;
+  line-height: 1;
 }
-#cmd-input::placeholder {
+
+/* Placeholder via CSS when the div is empty (data-placeholder set by JS) */
+#cmd-input:not([data-has-text])::before {
+  content: attr(data-placeholder);
   color: var(--muted-light);
   font-style: italic;
+  pointer-events: none;
+}
+
+/* Ghost completion span injected by JS inside #cmd-input */
+.ghost-span {
+  color: var(--muted-light);
+  opacity: 0.75;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* ── Autocomplete dropdown ───────────────────────────────────── */
+#ac-dropdown {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: -10px;                  /* align near prompt */
+  min-width: 280px;
+  background: var(--bg-term);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 -4px 16px rgba(80,40,0,.13);
+  overflow: hidden;
+  z-index: 100;
+}
+
+/* Completion list item */
+.ac-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  transition: background .1s;
+}
+.ac-item:hover    { background: var(--fact-hover);  }
+.ac-item.selected { background: var(--fact-active); }
+
+.ac-name   { font-weight: 700; color: var(--text); }
+.ac-params { color: var(--muted); }
+.ac-hint   {
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: 11px;
+  color: var(--muted-light);
+  white-space: nowrap;
+}
+
+/* Signature help row */
+.sig-help {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 7px 14px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.sig-name  { font-weight: 700; color: var(--text); }
+.sig-paren { color: var(--muted); }
+.sig-param { color: var(--muted); transition: color .1s; }
+.sig-param.active {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.sig-comma { color: var(--muted); }
+.sig-hint  {
+  margin-left: auto;
+  padding-left: 16px;
+  font-size: 11px;
+  color: var(--muted-light);
+}
+
+/* Tab-hint label shown at bottom of dropdown when cycling */
+.ac-tab-hint {
+  padding: 4px 12px;
+  font-size: 10px;
+  color: var(--muted-light);
+  border-top: 1px solid var(--faint);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.ac-tab-hint kbd {
+  font-size: 10px;
+  padding: 0 4px;
+  border-bottom-width: 1px;
 }
 
 /* ── Scrollbars ──────────────────────────────────────────────── */
