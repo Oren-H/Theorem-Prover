@@ -187,6 +187,30 @@ html, body {
 }
 .fact-item.new { animation: fact-flash 1.2s ease-out; }
 
+/* ── Rewrite selection highlight ─────────────────────────── */
+.fact-item.rewrite-sel {
+  background: rgba(92, 48, 16, 0.13);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.fact-item.rewrite-sel:hover { background: rgba(92, 48, 16, 0.20); }
+
+/* ── Rewrite picker block in #output-log ─────────────────── */
+.rewrite-picker { border-left: 2px solid var(--accent); }
+
+.rewrite-picker .output-cmd-line {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rewrite-option {
+  cursor: pointer;
+  transition: background .1s;
+}
+.rewrite-option:hover  { background: var(--fact-hover);  }
+.rewrite-option:active { background: var(--fact-active); }
+
 /* ── Horizontal drag divider ─────────────────────────────────── */
 #h-divider {
   flex: 0 0 var(--div-size);

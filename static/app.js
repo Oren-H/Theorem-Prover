@@ -13,6 +13,7 @@ const CMD_DEFS = [
   { name: "cont",          params: "L",    hint: "P⇒Q ↦ ¬Q⇒¬P"    },
   { name: "mp",            params: "P, L", hint: "P, P⇒Q ⊢ Q"     },
   { name: "flip",          params: "P",    hint: "p=r ↦ r=p"       },
+  { name: "rewrite",      params: "eq, target", hint: "substitute via eq" },
 ];
 
 // ── History / autocomplete state ─────────────────────────────
@@ -20,6 +21,11 @@ let cmdHistory  = [];
 let historyIdx  = -1;
 let pendingInput = "";
 let ac = { matches: [], idx: 0, prefix: "" };
+
+// ── Rewrite picker state ──────────────────────────────────────
+let rwSel    = { first: null, second: null };  // each: {id, el} or null
+let rwBusy   = false;    // prevents concurrent shift-click API calls
+let rwPickerEl = null;   // current picker DOM node in #output-log
 
 // ── DOM helpers ───────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -151,7 +157,10 @@ function renderFacts(facts, newIds = new Set()) {
     item.innerHTML =
       `<span class="fact-num">#${fact.id}</span>` +
       `<span class="fact-prop">${esc(fact.prop)}</span>`;
-    item.addEventListener("click", () => insertRef(fact.id));
+    item.addEventListener("click", (e) => {
+      if (e.shiftKey) { e.preventDefault(); handleShiftClick(fact.id, item); }
+      else { insertRef(fact.id); }
+    });
     list.appendChild(item);
   });
   if (newIds.size) list.scrollTop = list.scrollHeight;
@@ -190,6 +199,128 @@ function appendDivider(text) {
   el.textContent = text;
   outputEl().appendChild(el);
   outputEl().scrollTop = outputEl().scrollHeight;
+}
+
+// ============================================================
+// ── Rewrite picker ───────────────────────────────────────────
+// ============================================================
+
+function clearRewriteSelection() {
+  if (rwSel.first)  rwSel.first.el.classList.remove("rewrite-sel");
+  if (rwSel.second) rwSel.second.el.classList.remove("rewrite-sel");
+  rwSel    = { first: null, second: null };
+  rwBusy   = false;
+  if (rwPickerEl) { rwPickerEl.remove(); rwPickerEl = null; }
+}
+
+function showRewritePicker(options, eqId, targetId) {
+  if (rwPickerEl) { rwPickerEl.remove(); rwPickerEl = null; }
+
+  const block = document.createElement("div");
+  block.className = "output-entry rewrite-picker";
+
+  let html =
+    `<div class="output-cmd-line">` +
+    `<span class="prompt-glyph">↺</span>` +
+    `rewrite options for #${eqId} → #${targetId}</div>`;
+
+  options.forEach((prop, idx) => {
+    html +=
+      `<div class="output-result-line rewrite-option" data-idx="${idx}">` +
+      `<span class="result-mark ok">→</span>` +
+      `<span class="result-prop">${esc(prop)}</span></div>`;
+  });
+
+  block.innerHTML = html;
+
+  block.querySelectorAll(".rewrite-option").forEach(row => {
+    row.addEventListener("mousedown", async e => {
+      e.preventDefault();
+      const idx = +row.dataset.idx;
+      const data = await apiPost("/api/rewrite-apply", {
+        eq_id: eqId, target_id: targetId, option_idx: idx,
+      });
+      clearRewriteSelection();
+      if (data.ok) {
+        const newIds = new Set(data.facts.slice(-data.new_facts.length).map(f => f.id));
+        appendEntry(`rewrite(#${eqId}, #${targetId})`, data);
+        renderFacts(data.facts, newIds);
+      } else {
+        appendEntry(`rewrite(#${eqId}, #${targetId})`,
+          { ok: false, error: data.error, error_type: "invalid_input" });
+      }
+    });
+  });
+
+  outputEl().appendChild(block);
+  outputEl().scrollTop = outputEl().scrollHeight;
+  rwPickerEl = block;
+}
+
+async function handleShiftClick(factId, itemEl) {
+  if (rwBusy) return;
+
+  // Clicking an already-selected fact deselects everything.
+  if ((rwSel.first && rwSel.first.id === factId) ||
+      (rwSel.second && rwSel.second.id === factId)) {
+    clearRewriteSelection();
+    return;
+  }
+
+  if (!rwSel.first) {
+    rwSel.first = { id: factId, el: itemEl };
+    itemEl.classList.add("rewrite-sel");
+    return;
+  }
+
+  // Second selection — fire the API.
+  const firstId  = rwSel.first.id;
+  const secondId = factId;
+  rwSel.second = { id: factId, el: itemEl };
+  itemEl.classList.add("rewrite-sel");
+  rwBusy = true;
+
+  try {
+    const data = await apiPost("/api/rewrite-options", {
+      eq_id: firstId, target_id: secondId,
+    });
+
+    if (!data.ok) {
+      appendEntry(
+        `rewrite(#${firstId}, #${secondId})`,
+        { ok: false, error: data.error, error_type: "invalid_input" }
+      );
+      clearRewriteSelection();
+      return;
+    }
+
+    const eqId = data.eq_id, targetId = data.target_id;
+
+    if (data.options.length === 1) {
+      const applyData = await apiPost("/api/rewrite-apply", {
+        eq_id: eqId, target_id: targetId, option_idx: 0,
+      });
+      clearRewriteSelection();
+      if (applyData.ok) {
+        const newIds = new Set(applyData.facts.slice(-applyData.new_facts.length).map(f => f.id));
+        appendEntry(`rewrite(#${eqId}, #${targetId})`, applyData);
+        renderFacts(applyData.facts, newIds);
+      } else {
+        appendEntry(`rewrite(#${eqId}, #${targetId})`,
+          { ok: false, error: applyData.error, error_type: "invalid_input" });
+      }
+      return;
+    }
+
+    // Multiple options — show picker (selection stays highlighted).
+    rwBusy = false;
+    showRewritePicker(data.options, eqId, targetId);
+
+  } catch (err) {
+    appendEntry(`rewrite(#${firstId}, #${secondId})`,
+      { ok: false, error: String(err), error_type: "error" });
+    clearRewriteSelection();
+  }
 }
 
 // ── Command submission ────────────────────────────────────────
@@ -422,6 +553,7 @@ function initInput() {
     if (e.key === "Escape") {
       setGhostSpan(""); acDdEl().style.display = "none";
       ac = { matches: [], idx: 0, prefix: "" };
+      clearRewriteSelection();
       return;
     }
 
@@ -472,6 +604,7 @@ function initInput() {
 // ── Boot ─────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   $("reset-btn").addEventListener("click", async () => {
+    clearRewriteSelection();
     await apiPost("/api/reset");
     appendDivider("── session reset ──");
     renderFacts([], new Set());

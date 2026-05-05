@@ -225,6 +225,9 @@ _CMD_REFERENCE = """\
   [bold #1E1208]flip[/bold #1E1208](P)
     [#7A5C38]p = r   ↦   r = p   (also ≠)[/#7A5C38]
 
+  [bold #1E1208]rewrite[/bold #1E1208](eq, target)
+    [#7A5C38]substitute one occurrence via eq[/#7A5C38]
+
 
 [bold #5C3D1E]  NOTATION[/bold #5C3D1E]
 

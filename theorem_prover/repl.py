@@ -38,6 +38,7 @@ Inference rules
   cont(L)               contrapositive of implication L
   mp(P, L)              modus ponens: P, P⇒Q ⊢ Q
   flip(P)               symmetry of equality / inequality
+  rewrite(eq, target)   rewrite target via eq (auto-applies if unambiguous)
 
 Input notation
   0, 1, 2, …            integer literals → Num

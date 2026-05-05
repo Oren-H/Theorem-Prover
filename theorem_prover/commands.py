@@ -8,7 +8,7 @@ enter the list.
 fact_list is module-level state.  Call reset_session() to clear it.
 """
 from __future__ import annotations
-from .types import Zero, Succ, Add, Eq, Neq, Not, Imp, Num, Prop
+from .types import Zero, Succ, Add, Eq, Neq, Not, Imp, Num, Term, Prop
 from .validation import check_valid_num, check_valid_prop
 from .errors import InvalidInput, TypeMismatch
 
@@ -147,6 +147,128 @@ def flip(P) -> Prop:
 
 
 # ---------------------------------------------------------------------------
+# Rewrite: term-substitution engine
+# ---------------------------------------------------------------------------
+
+def _count_in_term(term: Term, find: Term) -> int:
+    """Count how many times `find` appears as a subterm of `term`."""
+    if term == find:
+        return 1  # match at this node; don't recurse into its children
+    if isinstance(term, Succ):
+        return _count_in_term(term.pred, find)
+    if isinstance(term, Add):
+        return _count_in_term(term.left, find) + _count_in_term(term.right, find)
+    return 0
+
+
+def _count_in_prop(prop: Prop, find: Term) -> int:
+    """Count how many times `find` appears in the terms of `prop`."""
+    if isinstance(prop, (Eq, Neq)):
+        return _count_in_term(prop.left, find) + _count_in_term(prop.right, find)
+    if isinstance(prop, Not):
+        return _count_in_prop(prop.prop, find)
+    if isinstance(prop, Imp):
+        return _count_in_prop(prop.antecedent, find) + _count_in_prop(prop.consequent, find)
+    return 0
+
+
+def _subst_one_in_term(term: Term, find: Term, replace: Term, pos: int) -> tuple:
+    """
+    Substitute the `pos`-th (0-indexed) occurrence of `find` with `replace`.
+    Returns (new_term, remaining) where remaining decrements per occurrence;
+    remaining == -1 signals that the substitution has been performed.
+    """
+    if term == find:
+        if pos == 0:
+            return replace, -1  # done
+        return term, pos - 1
+
+    if isinstance(term, Succ):
+        new_pred, remaining = _subst_one_in_term(term.pred, find, replace, pos)
+        return Succ(new_pred), remaining
+
+    if isinstance(term, Add):
+        new_left, remaining = _subst_one_in_term(term.left, find, replace, pos)
+        if remaining == -1:
+            return Add(new_left, term.right), -1  # short-circuit
+        new_right, remaining = _subst_one_in_term(term.right, find, replace, remaining)
+        return Add(new_left, new_right), remaining
+
+    return term, pos
+
+
+def _subst_one_in_prop(prop: Prop, find: Term, replace: Term, pos: int) -> tuple:
+    """
+    Substitute the `pos`-th occurrence of `find` in the terms of `prop`.
+    Returns (new_prop, remaining); remaining == -1 means substitution done.
+    """
+    if isinstance(prop, (Eq, Neq)):
+        cls = type(prop)
+        new_left, remaining = _subst_one_in_term(prop.left, find, replace, pos)
+        if remaining == -1:
+            return cls(new_left, prop.right), -1
+        new_right, remaining = _subst_one_in_term(prop.right, find, replace, remaining)
+        return cls(new_left, new_right), remaining
+
+    if isinstance(prop, Not):
+        new_inner, remaining = _subst_one_in_prop(prop.prop, find, replace, pos)
+        return Not(new_inner), remaining
+
+    if isinstance(prop, Imp):
+        new_ant, remaining = _subst_one_in_prop(prop.antecedent, find, replace, pos)
+        if remaining == -1:
+            return Imp(new_ant, prop.consequent), -1
+        new_con, remaining = _subst_one_in_prop(prop.consequent, find, replace, remaining)
+        return Imp(new_ant, new_con), remaining
+
+    return prop, pos
+
+
+def rewrite_options(eq: Eq, target: Prop) -> list:
+    """
+    Return all unique Props obtainable from `target` by replacing exactly one
+    occurrence of `eq.left` with `eq.right`, or one occurrence of `eq.right`
+    with `eq.left`.  Does not record anything.
+    """
+    results: list[Prop] = []
+    seen: set[Prop] = set()
+    for find, replace in [(eq.left, eq.right), (eq.right, eq.left)]:
+        for pos in range(_count_in_prop(target, find)):
+            new_prop, _ = _subst_one_in_prop(target, find, replace, pos)
+            if new_prop != target and new_prop not in seen:
+                seen.add(new_prop)
+                results.append(new_prop)
+    return results
+
+
+def record_prop(prop: Prop) -> Prop:
+    """Record an already-validated Prop into the session fact list."""
+    return _record(prop)
+
+
+def rewrite(eq_arg, target_arg) -> Prop:
+    """
+    Rewrite `target_arg` using the equality `eq_arg`.
+    Auto-applies if exactly one substitution is possible; raises otherwise.
+    """
+    check_valid_prop(eq_arg)
+    check_valid_prop(target_arg)
+    if not isinstance(eq_arg, Eq):
+        raise InvalidInput(
+            f"rewrite() first argument must be an Eq, got {type(eq_arg).__name__}"
+        )
+    options = rewrite_options(eq_arg, target_arg)
+    if len(options) == 0:
+        raise InvalidInput("No rewrites possible")
+    if len(options) == 1:
+        return _record(options[0])
+    raise InvalidInput(
+        f"{len(options)} rewrites possible — use the interactive rewrite picker "
+        f"(shift-click two facts in the web UI)"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Command registry (used by the parser/dispatcher)
 # ---------------------------------------------------------------------------
 
@@ -158,4 +280,5 @@ COMMANDS: dict[str, tuple] = {
     "cont":          (cont,          1),
     "mp":            (mp,            2),
     "flip":          (flip,          1),
+    "rewrite":       (rewrite,       2),
 }
