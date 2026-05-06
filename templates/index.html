@@ -103,6 +103,64 @@
               </div>
               <div class="ref-result">substitute via eq &nbsp;(or ⇧click two facts)</div>
             </div>
+
+            <div class="ref-item">
+              <div class="ref-sig">
+                <span class="ref-name">rewrite_fwd</span><span class="ref-args">(eq, target)</span>
+              </div>
+              <div class="ref-result">substitute eq.left → eq.right only</div>
+            </div>
+          </section>
+
+          <section class="ref-section">
+            <h3>Constructors</h3>
+
+            <div class="ref-item">
+              <div class="ref-sig">
+                <span class="ref-name">mk_add</span><span class="ref-args">(t1, t2)</span>
+              </div>
+              <div class="ref-result">build term t1 + t2 &nbsp;(no fact recorded)</div>
+            </div>
+
+            <div class="ref-item">
+              <div class="ref-sig">
+                <span class="ref-name">mk_eq</span><span class="ref-args">(t1, t2)</span>
+              </div>
+              <div class="ref-result">assert t1 = t2 as a hypothesis</div>
+            </div>
+          </section>
+
+          <section class="ref-section">
+            <h3>Induction</h3>
+
+            <div class="ref-item">
+              <div class="ref-sig">
+                <span class="ref-name">imp_intro</span><span class="ref-args">(P, Q)</span>
+              </div>
+              <div class="ref-result">P, Q &nbsp;⊢&nbsp; P ⇒ Q</div>
+            </div>
+
+            <div class="ref-item">
+              <div class="ref-sig">
+                <span class="ref-name">forall_intro</span><span class="ref-args">(n, P)</span>
+              </div>
+              <div class="ref-result">n, P &nbsp;⊢&nbsp; ∀n. P</div>
+            </div>
+
+            <div class="ref-item">
+              <div class="ref-sig">
+                <span class="ref-name">induction</span><span class="ref-args">(base, step)</span>
+              </div>
+              <div class="ref-result">P(0), ∀n. P(n)⇒P(n++) &nbsp;⊢&nbsp; ∀n. P(n)</div>
+              <div class="ref-note">step must be a forall_intro'd implication</div>
+            </div>
+
+            <div class="ref-item">
+              <div class="ref-sig">
+                <span class="ref-name">inst</span><span class="ref-args">(fa, t)</span>
+              </div>
+              <div class="ref-result">∀n. P, t &nbsp;⊢&nbsp; P[n:=t]</div>
+            </div>
           </section>
 
           <section class="ref-section">
@@ -119,6 +177,14 @@
               <tr>
                 <td><code>#N</code></td>
                 <td>reference fact N</td>
+              </tr>
+              <tr>
+                <td><code>n, m, k, …</code></td>
+                <td>term variables</td>
+              </tr>
+              <tr>
+                <td><code>n++</code></td>
+                <td>variable successor</td>
               </tr>
             </table>
           </section>

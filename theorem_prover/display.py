@@ -5,13 +5,15 @@ Uses Unicode: ≠ for inequality, ⇒ for implication, ¬ for negation.
 Parentheses are added when needed for unambiguous reading.
 """
 from __future__ import annotations
-from .types import Zero, Succ, Add, Eq, Neq, Not, Imp
+from .types import Zero, Succ, Add, Eq, Neq, Not, Imp, Var, ForAll
 
 
 def display_term(t) -> str:
     """Render a Term as a human-readable string."""
     if isinstance(t, Zero):
         return "0"
+    if isinstance(t, Var):
+        return t.name
     if isinstance(t, Succ):
         inner = display_term(t.pred)
         # Wrap in parens when inner is a Succ or Add to keep ++ binding clear.
@@ -56,4 +58,6 @@ def display_prop(p) -> str:
         if isinstance(p.consequent, Imp):
             right = f"({right})"
         return f"{left} \u21d2 {right}"
+    if isinstance(p, ForAll):
+        return f"\u2200{p.var}. {display_prop(p.body)}"
     return repr(p)

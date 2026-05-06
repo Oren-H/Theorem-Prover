@@ -13,7 +13,14 @@ const CMD_DEFS = [
   { name: "cont",          params: "L",    hint: "P⇒Q ↦ ¬Q⇒¬P"    },
   { name: "mp",            params: "P, L", hint: "P, P⇒Q ⊢ Q"     },
   { name: "flip",          params: "P",    hint: "p=r ↦ r=p"       },
-  { name: "rewrite",      params: "eq, target", hint: "substitute via eq" },
+  { name: "rewrite",       params: "eq, target",  hint: "substitute via eq"             },
+  { name: "rewrite_fwd",  params: "eq, target",  hint: "substitute eq.left → eq.right"  },
+  { name: "mk_add",        params: "t1, t2",      hint: "construct t1 + t2 as a term"    },
+  { name: "mk_eq",         params: "t1, t2",      hint: "assert t1 = t2 (hypothesis)"    },
+  { name: "imp_intro",     params: "P, Q",         hint: "P, Q ⊢ P ⇒ Q"                  },
+  { name: "forall_intro",  params: "n, P",         hint: "n, P ⊢ ∀n. P"                  },
+  { name: "induction",     params: "base, step",   hint: "PA induction ⊢ ∀n. P"           },
+  { name: "inst",          params: "fa, t",        hint: "instantiate ∀n.P at term t"     },
 ];
 
 // ── History / autocomplete state ─────────────────────────────

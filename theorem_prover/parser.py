@@ -25,7 +25,7 @@ Input syntax notes
 from __future__ import annotations
 from typing import Any
 
-from .types import Zero, Succ, Num
+from .types import Zero, Succ, Var, Num
 from .errors import InvalidCommand, InvalidInput
 from .commands import COMMANDS, fact_list
 
@@ -137,7 +137,7 @@ class Parser:
         """Consume all trailing '++' tokens and wrap value in Succ."""
         while self.peek().kind == "PLUSPLUS":
             self.consume()
-            if not isinstance(value, (Zero, Succ)):
+            if not isinstance(value, (Zero, Succ, Var)):
                 raise InvalidInput(
                     "Cannot apply '++' to a non-Num value"
                 )
@@ -179,6 +179,16 @@ class Parser:
         if tok.kind == "NAME":
             name = tok.value
             self.consume()
+
+            # Bare name not followed by '(' — treat as a term variable.
+            if self.peek().kind != "LPAREN":
+                if name in COMMANDS:
+                    raise InvalidInput(
+                        f"{name!r} is a command — call it with parentheses: {name}(...)"
+                    )
+                return self._apply_plusplus(Var(name))
+
+            # Named command followed by '('.
             if name not in COMMANDS:
                 raise InvalidCommand(
                     f"Unknown command: {name!r}\n"

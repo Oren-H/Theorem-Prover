@@ -8,8 +8,8 @@ enter the list.
 fact_list is module-level state.  Call reset_session() to clear it.
 """
 from __future__ import annotations
-from .types import Zero, Succ, Add, Eq, Neq, Not, Imp, Num, Term, Prop
-from .validation import check_valid_num, check_valid_prop
+from .types import Zero, Succ, Add, Eq, Neq, Not, Imp, ForAll, Var, Num, Term, Prop
+from .validation import check_valid_num, check_valid_term, check_valid_prop
 from .errors import InvalidInput, TypeMismatch
 
 # ---------------------------------------------------------------------------
@@ -61,6 +61,48 @@ def _props_equal(a: Prop, b: Prop) -> bool:
 
 def _record(prop: Prop) -> Prop:
     fact_list.append(prop)
+    return prop
+
+
+# ---------------------------------------------------------------------------
+# Variable substitution helpers
+# ---------------------------------------------------------------------------
+
+def subst_term(term: Term, var: str, replacement: Term) -> Term:
+    """Replace every occurrence of Var(var) in term with replacement."""
+    if isinstance(term, Var):
+        return replacement if term.name == var else term
+    if isinstance(term, Zero):
+        return term
+    if isinstance(term, Succ):
+        return Succ(subst_term(term.pred, var, replacement))
+    if isinstance(term, Add):
+        return Add(
+            subst_term(term.left, var, replacement),
+            subst_term(term.right, var, replacement),
+        )
+    return term
+
+
+def subst_prop(prop: Prop, var: str, replacement: Term) -> Prop:
+    """Replace every occurrence of Var(var) in the terms of prop with replacement."""
+    if isinstance(prop, (Eq, Neq)):
+        cls = type(prop)
+        return cls(
+            subst_term(prop.left, var, replacement),
+            subst_term(prop.right, var, replacement),
+        )
+    if isinstance(prop, Not):
+        return Not(subst_prop(prop.prop, var, replacement))
+    if isinstance(prop, Imp):
+        return Imp(
+            subst_prop(prop.antecedent, var, replacement),
+            subst_prop(prop.consequent, var, replacement),
+        )
+    if isinstance(prop, ForAll):
+        if prop.var == var:  # bound variable shadows the substitution
+            return prop
+        return ForAll(prop.var, subst_prop(prop.body, var, replacement))
     return prop
 
 
@@ -127,11 +169,101 @@ def mp(P, L) -> Prop:
 
 
 # ---------------------------------------------------------------------------
-# Placeholder — Induction schema (reserved for a future version)
+# Term and Prop constructors
 # ---------------------------------------------------------------------------
-# def induction(base, step):
-#     """PA induction schema — not yet implemented (out of scope for v0.1)."""
-#     raise NotImplementedError("Induction is not yet implemented")
+
+def mk_add(t1, t2) -> Add:
+    """Construct Add(t1, t2) as a term. Does not record to fact_list."""
+    check_valid_term(t1)
+    check_valid_term(t2)
+    return Add(t1, t2)
+
+
+def mk_eq(t1, t2) -> Eq:
+    """Assert t1 = t2 as a hypothesis and record it."""
+    check_valid_term(t1)
+    check_valid_term(t2)
+    return _record(Eq(t1, t2))
+
+
+# ---------------------------------------------------------------------------
+# Induction inference rules
+# ---------------------------------------------------------------------------
+
+def imp_intro(P, Q) -> Imp:
+    """Given Props P and Q, record the implication P ⇒ Q."""
+    check_valid_prop(P)
+    check_valid_prop(Q)
+    return _record(Imp(P, Q))
+
+
+def forall_intro(n, P) -> ForAll:
+    """Given Var n and Prop P, record ∀n. P."""
+    if not isinstance(n, Var):
+        raise InvalidInput(
+            f"forall_intro() first argument must be a variable (e.g. n), "
+            f"got {type(n).__name__}"
+        )
+    check_valid_prop(P)
+    return _record(ForAll(n.name, P))
+
+
+def induction(base, step) -> ForAll:
+    """
+    PA induction schema.
+
+    base : Prop              — must equal P[var := 0]
+    step : ForAll(var, P⇒Q) — must have Q == P[var := var++]
+
+    Derives ∀var. P.
+    """
+    check_valid_prop(base)
+    check_valid_prop(step)
+    if not isinstance(step, ForAll):
+        raise InvalidInput(
+            f"induction() second argument must be ∀n.(P ⇒ Q), "
+            f"got {type(step).__name__}"
+        )
+    if not isinstance(step.body, Imp):
+        raise InvalidInput(
+            f"induction() step body must be an implication (P ⇒ Q), "
+            f"got {type(step.body).__name__}"
+        )
+    var = step.var
+    P = step.body.antecedent
+    Q = step.body.consequent
+
+    expected_Q = subst_prop(P, var, Succ(Var(var)))
+    if Q != expected_Q:
+        from .display import display_prop
+        raise InvalidInput(
+            f"induction() step consequent must be P[{var}:={var}++].\n"
+            f"  Expected: {display_prop(expected_Q)}\n"
+            f"  Got:      {display_prop(Q)}"
+        )
+
+    expected_base = subst_prop(P, var, Zero())
+    if base != expected_base:
+        from .display import display_prop
+        raise InvalidInput(
+            f"induction() base case must be P[{var}:=0].\n"
+            f"  Expected: {display_prop(expected_base)}\n"
+            f"  Got:      {display_prop(base)}"
+        )
+
+    return _record(ForAll(var, P))
+
+
+def inst(fa, t) -> Prop:
+    """Instantiate ∀var. P at term t, deriving P[var := t]."""
+    check_valid_prop(fa)
+    check_valid_term(t)
+    if not isinstance(fa, ForAll):
+        raise InvalidInput(
+            f"inst() first argument must be a ∀-proposition, "
+            f"got {type(fa).__name__}"
+        )
+    return _record(subst_prop(fa.body, fa.var, t))
 
 
 def flip(P) -> Prop:
@@ -268,6 +400,35 @@ def rewrite(eq_arg, target_arg) -> Prop:
     )
 
 
+def rewrite_fwd(eq_arg, target_arg) -> Prop:
+    """
+    Rewrite `target_arg` using the equality `eq_arg`, forward direction only
+    (replaces eq.left with eq.right). Useful when reverse rewrites are ambiguous.
+    Auto-applies if exactly one forward substitution is possible; raises otherwise.
+    """
+    check_valid_prop(eq_arg)
+    check_valid_prop(target_arg)
+    if not isinstance(eq_arg, Eq):
+        raise InvalidInput(
+            f"rewrite_fwd() first argument must be an Eq, got {type(eq_arg).__name__}"
+        )
+    options: list[Prop] = []
+    seen: set[Prop] = set()
+    n = _count_in_prop(target_arg, eq_arg.left)
+    for pos in range(n):
+        new_prop, _ = _subst_one_in_prop(target_arg, eq_arg.left, eq_arg.right, pos)
+        if new_prop != target_arg and new_prop not in seen:
+            seen.add(new_prop)
+            options.append(new_prop)
+    if len(options) == 0:
+        raise InvalidInput("No forward rewrites possible")
+    if len(options) == 1:
+        return _record(options[0])
+    raise InvalidInput(
+        f"{len(options)} forward rewrites possible — be more specific"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Command registry (used by the parser/dispatcher)
 # ---------------------------------------------------------------------------
@@ -281,4 +442,11 @@ COMMANDS: dict[str, tuple] = {
     "mp":            (mp,            2),
     "flip":          (flip,          1),
     "rewrite":       (rewrite,       2),
+    "rewrite_fwd":   (rewrite_fwd,   2),
+    "mk_add":        (mk_add,        2),
+    "mk_eq":         (mk_eq,         2),
+    "imp_intro":     (imp_intro,     2),
+    "forall_intro":  (forall_intro,  2),
+    "induction":     (induction,     2),
+    "inst":          (inst,          2),
 }

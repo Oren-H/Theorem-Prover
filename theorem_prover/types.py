@@ -24,7 +24,13 @@ class Succ:
     pred: "Num"
 
 
-Num = Union[Zero, Succ]
+@dataclass(frozen=True)
+class Var:
+    """A natural number variable, e.g. Var('n') represents n."""
+    name: str
+
+
+Num = Union[Zero, Succ, Var]
 
 
 @dataclass(frozen=True)
@@ -68,4 +74,11 @@ class Imp:
     consequent: "Prop"
 
 
-Prop = Union[Eq, Neq, Not, Imp]
+@dataclass(frozen=True)
+class ForAll:
+    """Universal quantification: ∀var. body"""
+    var: str
+    body: "Prop"
+
+
+Prop = Union[Eq, Neq, Not, Imp, ForAll]
