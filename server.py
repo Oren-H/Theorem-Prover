@@ -157,8 +157,8 @@ def rewrite_apply():
 # Server entry point
 # ---------------------------------------------------------------------------
 
-def run_server(host: str = "127.0.0.1", port: int = 5050, open_browser: bool = True):
-    url = f"http://{host}:{port}"
+def run_server(host: str = "0.0.0.0", port: int = int(os.environ.get("PORT", 5050)), open_browser: bool = True):
+    url = f"http://127.0.0.1:{port}"
     if open_browser:
         def _open():
             import time
