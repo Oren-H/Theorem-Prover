@@ -1,6 +1,8 @@
-# PA Theorem Prover
+# Clean Theorem Prover
 
-An interactive theorem prover for **Peano Arithmetic (PA)**. You construct proofs by composing axiom commands and inference rules, and the tool accumulates a numbered list of derived facts that you can reference in subsequent steps.
+*A minimalist, command-driven theorem prover for Peano Arithmetic*
+
+You construct proofs by issuing commands. Each command validates its inputs, applies an axiom or inference rule, and appends the resulting proposition to a numbered **fact list**. To build a proof, compose commands — referencing earlier facts by number with `#N`. There is no ambient programming language, no type theory to recite, no syntax beyond the commands themselves.
 
 Three frontends are available: a browser-based web app (default), a terminal UI (TUI), and a plain REPL.
 
@@ -32,11 +34,29 @@ python main.py --test       # run built-in spec proof examples
 
 ### Inference Rules
 
-| Command | Effect |
-|---------|--------|
-| `cont(L)` | Contrapositive: `P ⇒ Q` becomes `¬Q ⇒ ¬P` |
-| `mp(P, L)` | Modus ponens: given `P` and `P ⇒ Q`, derives `Q` |
-| `flip(P)` | Symmetry: swaps sides of `=` or `≠` |
+| Command | Produces | Effect |
+|---------|----------|--------|
+| `cont(L)` | `¬Q ⇒ ¬P` | Contrapositive of implication `P ⇒ Q` |
+| `mp(P, L)` | `Q` | Modus ponens: given `P` and `P ⇒ Q`, derives `Q` |
+| `flip(P)` | `r = p` or `r ≠ p` | Symmetry: swaps sides of `=` or `≠` |
+| `rewrite(eq, target)` | Modified `target` | Substitute one occurrence of `eq.left` with `eq.right` in `target` |
+| `rewrite_fwd(eq, target)` | Modified `target` | Like `rewrite`, forward direction only |
+
+### Logical Constructors
+
+| Command | Produces | Effect |
+|---------|----------|--------|
+| `mk_add(t1, t2)` | `t1 + t2` | Construct an addition term |
+| `mk_eq(t1, t2)` | `t1 = t2` | Assert and record an equality |
+| `imp_intro(P, Q)` | `P ⇒ Q` | Construct and record an implication |
+
+### Induction
+
+| Command | Produces | Effect |
+|---------|----------|--------|
+| `forall_intro(n, P)` | `∀n. P` | Generalize a proposition over a variable |
+| `induction(base, step)` | `∀n. P` | PA induction schema: base case + inductive step → universal truth |
+| `inst(fa, t)` | `P[n := t]` | Instantiate a `∀`-proposition at a specific term |
 
 ### Input Notation
 
@@ -50,6 +70,45 @@ Commands can be nested — each nested call is also recorded as a fact:
 
 ```
 mp(flip(succ_not_zero(0)), cont(succ_imp_eq(0, 0++)))
+```
+
+---
+
+## Sample Proofs
+
+### Prove: 0++ ≠ 0
+
+```
+succ_not_zero(0)
+```
+```
+1.  0++ ≠ 0
+```
+
+### Prove: 0 ≠ 0++
+
+```
+succ_not_zero(0)
+flip(#1)
+```
+```
+1.  0++ ≠ 0
+2.  0 ≠ 0++
+```
+
+### Prove: (0++)++ ≠ 0++
+
+Uses contrapositive of the injectivity axiom, then modus ponens.
+
+```
+flip(succ_not_zero(0))
+cont(succ_imp_eq(0, 0++))
+mp(#1, #2)
+```
+```
+1.  0 ≠ 0++
+2.  0 ≠ 0++ ⇒ 0++ ≠ (0++)++
+3.  0++ ≠ (0++)++
 ```
 
 ---
@@ -95,7 +154,8 @@ Prop
 ├── Eq(left, right)    — left = right
 ├── Neq(left, right)   — left ≠ right  (syntactic sugar for Not(Eq(...)))
 ├── Not(prop)          — negation
-└── Imp(antecedent, consequent)  — implication ⇒
+├── Imp(antecedent, consequent)  — implication ⇒
+└── ForAll(var, body)  — universal quantification ∀
 ```
 
 Props are never Terms and vice versa — the validator enforces this boundary at runtime.
@@ -113,6 +173,7 @@ This module is the semantic core. Every command:
 Notable implementation details:
 - `_props_equal()` identifies `Neq(x,y)` with `Not(Eq(x,y))` structurally so that `mp()` can match antecedents regardless of which form was used.
 - `mp()` raises `TypeMismatch` (a distinct error class) when the supplied prop does not match the implication's antecedent, giving a clear error message showing both sides.
+- `induction()` validates that the base case equals `P[var := 0]` and the step consequent equals `P[var := var++]`, then records `∀var. P`.
 
 #### `parser.py` — Tokeniser and Recursive-Descent Parser
 
@@ -141,13 +202,13 @@ The tokeniser runs first and produces a flat token list. The recursive-descent `
 Three recursive validators:
 - `check_valid_num(x)` — accepts `Zero` or `Succ`
 - `check_valid_term(x)` — accepts `Num` or `Add`; explicitly rejects Props with a clear error
-- `check_valid_prop(x)` — accepts `Eq`, `Neq`, `Not`, `Imp`; explicitly rejects Terms
+- `check_valid_prop(x)` — accepts `Eq`, `Neq`, `Not`, `Imp`, `ForAll`; explicitly rejects Terms
 
 All raise `InvalidInput` on failure.
 
 #### `display.py` — Unicode Renderer
 
-`display_term` and `display_prop` recursively render the AST to human-readable Unicode strings using `≠`, `⇒`, `¬`. Parentheses are inserted only where needed for unambiguous reading (e.g., nested `Add` or `Imp`).
+`display_term` and `display_prop` recursively render the AST to human-readable Unicode strings using `≠`, `⇒`, `¬`, `∀`. Parentheses are inserted only where needed for unambiguous reading (e.g., nested `Add` or `Imp`).
 
 #### `errors.py` — Exception Hierarchy
 
@@ -216,7 +277,7 @@ Dispatches based on CLI flags:
 | `--tui` | Textual TUI |
 | `--test` | Run spec proof examples and exit with pass/fail code |
 
-The `--test` mode runs six reference proofs from the specification and prints a PASS/FAIL report, useful for regression testing.
+The `--test` mode runs reference proofs from the specification and prints a PASS/FAIL report, useful for regression testing.
 
 ---
 
